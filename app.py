@@ -26,11 +26,11 @@ model = load_model()
 # ===============================
 if "index" not in st.session_state:
     st.session_state.index = None
-    st.session_state.image_data = []
+    st.session_state.images = []
     st.session_state.ready = False
 
 # ===============================
-# Upload ZIP Section
+# Upload ZIP
 # ===============================
 st.header("1️⃣ Upload ZIP (Max 500 Images)")
 
@@ -40,47 +40,40 @@ if zip_file and not st.session_state.ready:
 
     with st.spinner("Processing images... Please wait."):
 
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            zip_path = os.path.join(tmp_dir, "images.zip")
+        image_list = []
+        embeddings = []
 
-            with open(zip_path, "wb") as f:
-                f.write(zip_file.read())
+        with zipfile.ZipFile(zip_file, "r") as zip_ref:
+            file_list = zip_ref.namelist()
 
-            with zipfile.ZipFile(zip_path, "r") as zip_ref:
-                zip_ref.extractall(tmp_dir)
-
-            image_paths = []
-            embeddings = []
-
-            for root, _, files in os.walk(tmp_dir):
-                for file in files:
-                    if file.lower().endswith(("png", "jpg", "jpeg")):
-                        if len(image_paths) >= MAX_IMAGES:
-                            break
-                        path = os.path.join(root, file)
-                        try:
-                            img = Image.open(path).convert("RGB")
+            for file_name in file_list:
+                if file_name.lower().endswith(("png", "jpg", "jpeg")):
+                    if len(image_list) >= MAX_IMAGES:
+                        break
+                    try:
+                        with zip_ref.open(file_name) as file:
+                            img = Image.open(file).convert("RGB")
+                            image_list.append(img)
                             emb = model.encode(img)
                             embeddings.append(emb)
-                            image_paths.append(path)
-                        except:
-                            continue
+                    except:
+                        continue
 
-            if len(image_paths) == 0:
-                st.error("No valid images found inside ZIP.")
-                st.stop()
+        if len(image_list) == 0:
+            st.error("No valid images found inside ZIP.")
+            st.stop()
 
-            embeddings = np.array(embeddings)
+        embeddings = np.array(embeddings)
 
-            dimension = embeddings.shape[1]
-            index = faiss.IndexFlatL2(dimension)
-            index.add(embeddings)
+        dimension = embeddings.shape[1]
+        index = faiss.IndexFlatL2(dimension)
+        index.add(embeddings)
 
-            st.session_state.index = index
-            st.session_state.image_data = image_paths
-            st.session_state.ready = True
+        st.session_state.index = index
+        st.session_state.images = image_list
+        st.session_state.ready = True
 
-    st.success(f"✅ {len(image_paths)} images indexed successfully!")
+    st.success(f"✅ {len(image_list)} images indexed successfully!")
 
 # ===============================
 # Search Section
@@ -109,9 +102,7 @@ if st.session_state.ready:
             percentage = round(similarity * 100, 2)
 
             st.subheader(f"#{rank+1} — Match: {percentage}%")
-
-            matched_img = Image.open(st.session_state.image_data[idx])
-            st.image(matched_img, width=300)
+            st.image(st.session_state.images[idx], width=300)
 
 # ===============================
 # Reset Button
@@ -119,6 +110,6 @@ if st.session_state.ready:
 if st.session_state.ready:
     if st.button("🔄 Reset Session"):
         st.session_state.index = None
-        st.session_state.image_data = []
+        st.session_state.images = []
         st.session_state.ready = False
         st.experimental_rerun()
